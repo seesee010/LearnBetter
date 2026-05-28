@@ -4,3 +4,6 @@
   --text-primary: #ffffff;
   --accent: #6366f1;
 }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.page { padding: var(--spacing-lg, 24px); }
