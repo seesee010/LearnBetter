@@ -63,7 +63,7 @@ export interface Settings {
   shuffle_default: boolean;
 }
 
-export type Quality = 0 | 1 | 2 | 3 | 4 | 5;
+export type Quality = 1 | 2 | 3 | 4;
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'clean',
