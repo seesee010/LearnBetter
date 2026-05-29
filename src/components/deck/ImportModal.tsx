@@ -1,16 +1,23 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useDeckStore } from '../../store/deckStore';
 import { openFileDialog } from '../../api/tauri';
 import LoadingSpinner from '../ui/LoadingSpinner';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 interface Props { onClose: () => void; }
 
 const SUPPORTED = ['.mL', '.json', '.yaml', '.yml', '.toml', '.csv'];
+const SUPPORTED_EXTS = new Set(['ml', 'json', 'yaml', 'yml', 'toml', 'csv']);
 
 function detectFormat(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase() ?? '';
   const map: Record<string, string> = { ml: '.mL', json: 'JSON', yaml: 'YAML', yml: 'YAML', toml: 'TOML', csv: 'CSV' };
   return map[ext] ?? ext.toUpperCase();
+}
+
+function isSupported(path: string): boolean {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  return SUPPORTED_EXTS.has(ext);
 }
 
 export default function ImportModal({ onClose }: Props) {
@@ -19,6 +26,31 @@ export default function ImportModal({ onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    getCurrentWebviewWindow().onDragDropEvent((event) => {
+      if (event.payload.type === 'over') {
+        setDragging(true);
+      } else if (event.payload.type === 'drop') {
+        setDragging(false);
+        const paths: string[] = event.payload.paths;
+        if (paths.length > 0) {
+          const path = paths[0];
+          if (isSupported(path)) {
+            setSelectedPath(path);
+            setError(null);
+          } else {
+            setError(`Unsupported file type. Use: ${SUPPORTED.join(', ')}`);
+          }
+        }
+      } else {
+        setDragging(false);
+      }
+    }).then((fn) => { unlisten = fn; });
+
+    return () => { unlisten?.(); };
+  }, []);
 
   const handleBrowse = async () => {
     const path = await openFileDialog();
@@ -35,13 +67,7 @@ export default function ImportModal({ onClose }: Props) {
     else setError('Import failed. Check the file format.');
   };
 
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); setDragging(true); }, []);
-  const handleDragLeave = useCallback(() => setDragging(false), []);
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) { setSelectedPath(file.name); setError(null); }
-  }, []);
+  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); }, []);
 
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -55,8 +81,6 @@ export default function ImportModal({ onClose }: Props) {
           className={`drop-zone${dragging ? ' drop-zone--active' : ''}${selectedPath ? ' drop-zone--selected' : ''}`}
           onClick={handleBrowse}
           onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
         >
           {selectedPath ? (
             <>

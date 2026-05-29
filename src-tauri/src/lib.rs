@@ -18,6 +18,7 @@ pub fn run() {
         let db = Database::new(&db_path).expect("Failed to initialize database");
 
         tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
             .manage(DbState(Mutex::new(db)))
             .invoke_handler(tauri::generate_handler![
                 import_file,
