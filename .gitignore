@@ -3,7 +3,8 @@ node_modules/
 
 # Build outputs
 dist/
-build/
+build/*
+!build/.gitkeep
 src-tauri/target/
 target/
 
