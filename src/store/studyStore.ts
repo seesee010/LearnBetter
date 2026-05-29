@@ -21,6 +21,7 @@ interface SessionStats {
 
 interface StudyStore {
   cards: Card[];
+  baseCardCount: number;
   currentIndex: number;
   isShuffled: boolean;
   sessionId: string | null;
@@ -37,6 +38,7 @@ interface StudyStore {
 
 export const useStudyStore = create<StudyStore>((set, get) => ({
   cards: [],
+  baseCardCount: 0,
   currentIndex: 0,
   isShuffled: false,
   sessionId: null,
@@ -53,6 +55,7 @@ export const useStudyStore = create<StudyStore>((set, get) => ({
       const sessionId = crypto.randomUUID();
       set({
         cards,
+        baseCardCount: cards.length,
         currentIndex: 0,
         isShuffled: shuffle,
         sessionId,
@@ -69,14 +72,13 @@ export const useStudyStore = create<StudyStore>((set, get) => ({
   },
 
   nextCard: async (quality) => {
-    const { cards, currentIndex, sessionId, correctCount, startTime } = get();
+    const { cards, currentIndex, sessionId, correctCount, startTime, baseCardCount } = get();
     if (!sessionId || currentIndex >= cards.length) return;
 
     const currentCard = cards[currentIndex];
     const isCorrect = quality >= 3;
     const newCorrectCount = correctCount + (isCorrect ? 1 : 0);
     const newIndex = currentIndex + 1;
-    const isComplete = newIndex >= cards.length;
 
     try {
       await api.submitReview(currentCard.id, quality, sessionId);
@@ -85,24 +87,34 @@ export const useStudyStore = create<StudyStore>((set, get) => ({
       useToastStore.getState().addToast(`Review submit failed: ${msg}`, 'error');
     }
 
+    // Again: re-insert card 3 positions ahead so it comes back soon
+    let updatedCards = cards;
+    if (quality === 1) {
+      updatedCards = [...cards];
+      const insertAt = Math.min(newIndex + 2, cards.length);
+      updatedCards.splice(insertAt, 0, currentCard);
+    }
+
+    const isComplete = newIndex >= updatedCards.length;
+
     if (isComplete) {
       const duration = Date.now() - startTime;
-      const accuracy = cards.length > 0 ? newCorrectCount / cards.length : 0;
+      const accuracy = baseCardCount > 0 ? newCorrectCount / baseCardCount : 0;
       const sessionStats = {
         accuracy,
         duration,
-        cardsTotal: cards.length,
+        cardsTotal: baseCardCount,
         cardsCorrect: newCorrectCount,
       };
       try {
-        await api.endSession(sessionId, newCorrectCount, cards.length);
+        await api.endSession(sessionId, newCorrectCount, baseCardCount);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         useToastStore.getState().addToast(`Session end failed: ${msg}`, 'error');
       }
-      set({ currentIndex: newIndex, correctCount: newCorrectCount, isComplete: true, sessionStats });
+      set({ cards: updatedCards, currentIndex: newIndex, correctCount: newCorrectCount, isComplete: true, sessionStats });
     } else {
-      set({ currentIndex: newIndex, correctCount: newCorrectCount });
+      set({ cards: updatedCards, currentIndex: newIndex, correctCount: newCorrectCount });
     }
   },
 
@@ -112,6 +124,9 @@ export const useStudyStore = create<StudyStore>((set, get) => ({
   },
 
   toggleShuffle: () => {
-    set((state) => ({ isShuffled: !state.isShuffled }));
+    const { deckId, isShuffled } = get();
+    const newShuffled = !isShuffled;
+    set({ isShuffled: newShuffled });
+    if (deckId) get().startSession(deckId, newShuffled);
   },
 }));

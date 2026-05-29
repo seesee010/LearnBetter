@@ -11,13 +11,13 @@ export default function StudyCard({ card, onRate }: Props) {
 
   useEffect(() => { setFlipped(false); }, [card.id]);
 
-  const flip = useCallback(() => setFlipped(true), []);
+  const flip = useCallback(() => setFlipped((f) => !f), []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); if (!flipped) flip(); }
+      if (e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); flip(); }
       if (flipped) {
-        if (e.key === '1') onRate(0);
+        if (e.key === '1') onRate(1);
         if (e.key === '2') onRate(2);
         if (e.key === '3') onRate(3);
         if (e.key === '4') onRate(4);
@@ -29,23 +29,24 @@ export default function StudyCard({ card, onRate }: Props) {
 
   return (
     <div className="study-card-wrapper">
-      <div className={`study-card${flipped ? ' study-card--flipped' : ''}`} onClick={!flipped ? flip : undefined}>
+      <div className={`study-card${flipped ? ' study-card--flipped' : ''}`} onClick={flip}>
         <div className="study-card__inner">
           <div className="study-card__face study-card__front">
             <div className="study-card__label">Question</div>
             <div className="study-card__text">{card.front}</div>
-            {!flipped && <div className="study-card__hint">Click or press Space to reveal</div>}
+            {!flipped && <div className="study-card__hint">Click or Space to reveal</div>}
           </div>
           <div className="study-card__face study-card__back">
             <div className="study-card__label">Answer</div>
             <div className="study-card__text">{card.back}</div>
+            <div className="study-card__hint">Click or Space to flip back</div>
           </div>
         </div>
       </div>
 
       {flipped && (
         <div className="rating-buttons">
-          <button className="rating-btn rating-btn--again" onClick={() => onRate(0)}>
+          <button className="rating-btn rating-btn--again" onClick={() => onRate(1)}>
             <span>Again</span><kbd>1</kbd>
           </button>
           <button className="rating-btn rating-btn--hard" onClick={() => onRate(2)}>
@@ -63,7 +64,6 @@ export default function StudyCard({ card, onRate }: Props) {
       <style>{`
         .study-card-wrapper { display: flex; flex-direction: column; align-items: center; gap: var(--spacing-lg); width: 100%; }
         .study-card { width: 100%; max-width: 640px; height: 320px; perspective: 1200px; cursor: pointer; }
-        .study-card--flipped { cursor: default; }
         .study-card__inner {
           position: relative; width: 100%; height: 100%;
           transform-style: preserve-3d;
