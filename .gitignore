@@ -1,12 +1,37 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 dist/
+build/
+src-tauri/target/
 target/
-.DS_Store
+
+# Agent workflow & planning (not for public repo)
+prompt.txt
+task.txt
+temp/
+finish*/
+persData/
+config/
+
+# SQLite databases
 *.db
 *.db-shm
 *.db-wal
-src-tauri/target/
-.env
+
+# Python
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env
