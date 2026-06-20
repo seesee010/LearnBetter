@@ -1,6 +1,6 @@
 # Build Learn++ for Windows and copy artifacts to build/
 
-$target = 'x86_64-pc-windows-gnu'
+$target = 'x86_64-pc-windows-msvc'
 $buildDir = 'build'
 $exeSrc = "src-tauri\target\$target\release\learnpp.exe"
 $installerSrc = "src-tauri\target\$target\release\bundle\nsis\Learn++_0.1.0_x64-setup.exe"

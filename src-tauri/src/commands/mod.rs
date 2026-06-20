@@ -76,14 +76,50 @@ pub fn submit_review(
         .unwrap_or((2.5, 1, 0));
 
     let result = sm2::review(quality, ef, iv, reps);
-    db.upsert_review(
-        &card_id,
-        result.ease_factor,
-        result.interval,
-        result.repetitions,
-        result.due_date,
-    )
-    .map_err(|e| e.to_string())
+    let review = db
+        .upsert_review(
+            &card_id,
+            result.ease_factor,
+            result.interval,
+            result.repetitions,
+            result.due_date,
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Append this rating to the history log (which question was rated how).
+    db.log_review(&card_id, quality).map_err(|e| e.to_string())?;
+
+    Ok(review)
+}
+
+#[tauri::command]
+pub fn save_progress(progress: DeckProgress, state: State<DbState>) -> Result<(), String> {
+    let db = state.0.lock().map_err(|e| e.to_string())?;
+    db.save_progress(&progress).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_progress(
+    deck_id: String,
+    state: State<DbState>,
+) -> Result<Option<DeckProgress>, String> {
+    let db = state.0.lock().map_err(|e| e.to_string())?;
+    db.get_progress(&deck_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn clear_progress(deck_id: String, state: State<DbState>) -> Result<(), String> {
+    let db = state.0.lock().map_err(|e| e.to_string())?;
+    db.clear_progress(&deck_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_card_history(
+    card_id: String,
+    state: State<DbState>,
+) -> Result<Vec<ReviewLogEntry>, String> {
+    let db = state.0.lock().map_err(|e| e.to_string())?;
+    db.get_card_history(&card_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

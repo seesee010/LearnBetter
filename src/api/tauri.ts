@@ -1,6 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { Card, CardReview, Deck, DeckSummary, Quality, Settings, Stats } from '../types';
+import type {
+  Card,
+  CardReview,
+  Deck,
+  DeckProgress,
+  DeckSummary,
+  Quality,
+  ReviewLogEntry,
+  Settings,
+  Stats,
+} from '../types';
 
 export async function importFile(path: string): Promise<Deck> {
   return invoke<Deck>('import_file', { path });
@@ -43,6 +53,22 @@ export async function submitReview(
   sessionId: string
 ): Promise<CardReview> {
   return invoke<CardReview>('submit_review', { cardId, quality, sessionId });
+}
+
+export async function saveProgress(progress: DeckProgress): Promise<void> {
+  return invoke<void>('save_progress', { progress });
+}
+
+export async function getProgress(deckId: string): Promise<DeckProgress | null> {
+  return invoke<DeckProgress | null>('get_progress', { deckId });
+}
+
+export async function clearProgress(deckId: string): Promise<void> {
+  return invoke<void>('clear_progress', { deckId });
+}
+
+export async function getCardHistory(cardId: string): Promise<ReviewLogEntry[]> {
+  return invoke<ReviewLogEntry[]>('get_card_history', { cardId });
 }
 
 export async function endSession(

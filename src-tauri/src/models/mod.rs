@@ -38,6 +38,25 @@ pub struct CardReview {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewLogEntry {
+    pub id: String,
+    pub card_id: String,
+    pub deck_id: String,
+    pub quality: i32,
+    pub reviewed_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckProgress {
+    pub deck_id: String,
+    pub current_index: i32,
+    pub correct_count: i32,
+    pub base_card_count: i32,
+    pub card_order: Vec<String>,
+    pub is_shuffled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StudySession {
     pub id: String,
     pub deck_id: String,

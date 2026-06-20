@@ -33,6 +33,23 @@ export interface CardReview {
   last_review: number;
 }
 
+export interface ReviewLogEntry {
+  id: string;
+  card_id: string;
+  deck_id: string;
+  quality: number;
+  reviewed_at: number;
+}
+
+export interface DeckProgress {
+  deck_id: string;
+  current_index: number;
+  correct_count: number;
+  base_card_count: number;
+  card_order: string[];
+  is_shuffled: boolean;
+}
+
 export interface StudySession {
   id: string;
   deck_id: string;

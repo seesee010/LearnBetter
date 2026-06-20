@@ -64,6 +64,29 @@ impl Database {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            -- Append-only history of every individual rating the user gave.
+            CREATE TABLE IF NOT EXISTS review_log (
+                id TEXT PRIMARY KEY,
+                card_id TEXT NOT NULL,
+                deck_id TEXT NOT NULL,
+                quality INTEGER NOT NULL,
+                reviewed_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_review_log_card ON review_log(card_id);
+            CREATE INDEX IF NOT EXISTS idx_review_log_deck ON review_log(deck_id);
+
+            -- Resume point: where the user last was in a deck (auto-saved).
+            CREATE TABLE IF NOT EXISTS deck_progress (
+                deck_id TEXT PRIMARY KEY,
+                current_index INTEGER NOT NULL,
+                correct_count INTEGER NOT NULL DEFAULT 0,
+                base_card_count INTEGER NOT NULL DEFAULT 0,
+                card_order TEXT NOT NULL DEFAULT '[]',
+                is_shuffled INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+            );
         ",
         )
     }
@@ -244,6 +267,97 @@ impl Database {
         })
     }
 
+    /// Append a single rating to the review history. The deck the card belongs
+    /// to is looked up so the log can be queried per-deck.
+    pub fn log_review(&self, card_id: &str, quality: u8) -> SqlResult<()> {
+        let deck_id: String = self
+            .conn
+            .query_row(
+                "SELECT deck_id FROM cards WHERE id = ?1",
+                params![card_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or_default();
+        self.conn.execute(
+            "INSERT INTO review_log (id, card_id, deck_id, quality, reviewed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![Uuid::new_v4().to_string(), card_id, deck_id, quality as i64, now_unix()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_card_history(&self, card_id: &str) -> SqlResult<Vec<ReviewLogEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, card_id, deck_id, quality, reviewed_at
+             FROM review_log WHERE card_id = ?1 ORDER BY reviewed_at ASC",
+        )?;
+        let rows = stmt.query_map(params![card_id], |row| {
+            Ok(ReviewLogEntry {
+                id: row.get(0)?,
+                card_id: row.get(1)?,
+                deck_id: row.get(2)?,
+                quality: row.get(3)?,
+                reviewed_at: row.get(4)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Save the user's current position in a deck so the next session resumes
+    /// exactly where they left off (same card order and index).
+    pub fn save_progress(&self, progress: &DeckProgress) -> SqlResult<()> {
+        let order_json =
+            serde_json::to_string(&progress.card_order).unwrap_or_else(|_| "[]".to_string());
+        self.conn.execute(
+            "INSERT INTO deck_progress
+             (deck_id, current_index, correct_count, base_card_count, card_order, is_shuffled, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(deck_id) DO UPDATE SET
+             current_index=excluded.current_index, correct_count=excluded.correct_count,
+             base_card_count=excluded.base_card_count, card_order=excluded.card_order,
+             is_shuffled=excluded.is_shuffled, updated_at=excluded.updated_at",
+            params![
+                progress.deck_id,
+                progress.current_index,
+                progress.correct_count,
+                progress.base_card_count,
+                order_json,
+                progress.is_shuffled as i64,
+                now_unix()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_progress(&self, deck_id: &str) -> SqlResult<Option<DeckProgress>> {
+        self.conn
+            .query_row(
+                "SELECT deck_id, current_index, correct_count, base_card_count, card_order, is_shuffled
+                 FROM deck_progress WHERE deck_id = ?1",
+                params![deck_id],
+                |row| {
+                    let order_str: String = row.get(4)?;
+                    let card_order: Vec<String> = serde_json::from_str(&order_str).unwrap_or_default();
+                    Ok(DeckProgress {
+                        deck_id: row.get(0)?,
+                        current_index: row.get(1)?,
+                        correct_count: row.get(2)?,
+                        base_card_count: row.get(3)?,
+                        card_order,
+                        is_shuffled: row.get::<_, i64>(5)? != 0,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    pub fn clear_progress(&self, deck_id: &str) -> SqlResult<()> {
+        self.conn
+            .execute("DELETE FROM deck_progress WHERE deck_id = ?1", params![deck_id])?;
+        Ok(())
+    }
+
     pub fn insert_session(&self, session: &StudySession) -> SqlResult<()> {
         self.conn.execute(
             "INSERT INTO study_sessions (id, deck_id, started_at, ended_at, cards_correct, cards_total)
@@ -275,6 +389,9 @@ impl Database {
     }
 
     pub fn delete_deck(&self, deck_id: &str) -> SqlResult<()> {
+        // review_log has no FK (it's an append-only history), so clean it up explicitly.
+        self.conn
+            .execute("DELETE FROM review_log WHERE deck_id = ?1", params![deck_id])?;
         self.conn
             .execute("DELETE FROM decks WHERE id = ?1", params![deck_id])?;
         Ok(())
@@ -460,6 +577,84 @@ mod tests {
         let r = review.unwrap();
         assert_eq!(r.card_id, "c1");
         assert_eq!(r.ease_factor, 2.5);
+    }
+
+    #[test]
+    fn test_log_review_records_history() {
+        let db = Database::in_memory().unwrap();
+        db.insert_deck(&test_deck("deck1")).unwrap();
+        db.log_review("c1", 4).unwrap();
+        db.log_review("c1", 2).unwrap();
+        let history = db.get_card_history("c1").unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].quality, 4);
+        assert_eq!(history[1].quality, 2);
+        assert_eq!(history[0].deck_id, "deck1");
+    }
+
+    #[test]
+    fn test_save_and_get_progress() {
+        let db = Database::in_memory().unwrap();
+        db.insert_deck(&test_deck("deck1")).unwrap();
+        let progress = DeckProgress {
+            deck_id: "deck1".to_string(),
+            current_index: 1,
+            correct_count: 1,
+            base_card_count: 2,
+            card_order: vec!["c2".to_string(), "c1".to_string()],
+            is_shuffled: true,
+        };
+        db.save_progress(&progress).unwrap();
+
+        let loaded = db.get_progress("deck1").unwrap().unwrap();
+        assert_eq!(loaded.current_index, 1);
+        assert_eq!(loaded.correct_count, 1);
+        assert_eq!(loaded.card_order, vec!["c2".to_string(), "c1".to_string()]);
+        assert!(loaded.is_shuffled);
+    }
+
+    #[test]
+    fn test_save_progress_overwrites() {
+        let db = Database::in_memory().unwrap();
+        db.insert_deck(&test_deck("deck1")).unwrap();
+        let mut progress = DeckProgress {
+            deck_id: "deck1".to_string(),
+            current_index: 0,
+            correct_count: 0,
+            base_card_count: 2,
+            card_order: vec!["c1".to_string(), "c2".to_string()],
+            is_shuffled: false,
+        };
+        db.save_progress(&progress).unwrap();
+        progress.current_index = 2;
+        progress.correct_count = 2;
+        db.save_progress(&progress).unwrap();
+        let loaded = db.get_progress("deck1").unwrap().unwrap();
+        assert_eq!(loaded.current_index, 2);
+        assert_eq!(loaded.correct_count, 2);
+    }
+
+    #[test]
+    fn test_clear_progress() {
+        let db = Database::in_memory().unwrap();
+        db.insert_deck(&test_deck("deck1")).unwrap();
+        let progress = DeckProgress {
+            deck_id: "deck1".to_string(),
+            current_index: 1,
+            correct_count: 0,
+            base_card_count: 2,
+            card_order: vec!["c1".to_string(), "c2".to_string()],
+            is_shuffled: false,
+        };
+        db.save_progress(&progress).unwrap();
+        db.clear_progress("deck1").unwrap();
+        assert!(db.get_progress("deck1").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_progress_missing() {
+        let db = Database::in_memory().unwrap();
+        assert!(db.get_progress("nope").unwrap().is_none());
     }
 
     #[test]
